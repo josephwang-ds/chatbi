@@ -33,7 +33,7 @@ st.markdown("""
   }
   .stButton>button:hover { border-color:var(--primary-color); }
   .stButton>button[kind="primary"] { background:var(--primary-color) !important;border-color:var(--primary-color) !important; color:white !important; }
-  [data-testid="stDataFrame"] { border:1px solid #334155;border-radius:8px; }
+  [data-testid="stDataFrame"] { border:1px solid rgba(120,130,150,0.45);border-radius:8px; }
   code { background:var(--secondary-background-color) !important; color:var(--text-color) !important; }
   [data-testid="stFileUploader"] {
     border:2px dashed rgba(120,130,150,0.45) !important;border-radius:10px !important;
@@ -53,16 +53,21 @@ st.markdown("""
   }
   .guide-box {
     background:var(--secondary-background-color);border:1px solid rgba(120,130,150,0.45);border-radius:8px;
-    padding:1rem 1.2rem;font-size:0.85rem;line-height:1.8;margin-bottom:1rem;
+    padding:1rem 1.2rem;color:var(--text-color) !important;font-size:0.85rem;line-height:1.8;margin-bottom:1rem;
   }
   .story-box {
     background:var(--secondary-background-color);border:1px solid rgba(99,102,241,0.45);
     border-left:3px solid #6366f1;border-radius:0 8px 8px 0;
-    padding:1rem 1.2rem;font-size:0.87rem;line-height:1.8;margin-bottom:1rem;
+    padding:1rem 1.2rem;color:var(--text-color) !important;font-size:0.87rem;line-height:1.8;margin-bottom:1rem;
   }
   .flow-label {
-    color:#94a3b8;font-size:0.74rem;font-weight:700;letter-spacing:0.07em;
+    color:var(--text-color);opacity:0.72;font-size:0.74rem;font-weight:700;letter-spacing:0.07em;
     text-transform:uppercase;display:block;margin-bottom:0.35rem;margin-top:0.5rem;
+  }
+  .muted-text { color:var(--text-color);opacity:0.72;font-size:0.85rem; }
+  .insight-box {
+    background:var(--secondary-background-color);border-left:3px solid #6366f1;border-radius:0 8px 8px 0;
+    padding:1rem 1.2rem;color:var(--text-color) !important;line-height:1.8;
   }
 </style>
 """, unsafe_allow_html=True)
@@ -75,17 +80,26 @@ CHART_THEME = dict(template="streamlit",
 SAMPLE_DBS = {
     "🛒 E-commerce": {
         "description": "Weekly sales across products, regions, channels + marketing spend",
+        "description_zh": "按产品、地区、渠道拆分的周度销售、客户与投放数据",
         "schema": """Tables:
 1. orders (order_id, order_date, product, category, region, channel, units, unit_price, revenue, cost, gross_profit)
 2. customers (customer_id, order_id, customer_name, segment, country, is_new)  — is_new: 1=new, 0=returning
 3. marketing (week, channel, ad_spend, impressions, clicks, conversions)""",
         "questions": [
-            "Which product has the highest total revenue?",
-            "Gross profit margin by category?",
-            "Online vs Retail channel revenue",
-            "Which week had the best ad spend ROI?",
-            "New vs returning customers by segment",
-            "Which region has the most orders?",
+            "Monthly GMV with trailing 3-month moving average",
+            "Month-over-month GMV growth by channel",
+            "New vs returning customer GMV and margin by segment",
+            "Rank each region's top product by gross profit",
+            "Ad spend ROI by channel with revenue joined",
+            "Cumulative GMV contribution by category over time",
+        ],
+        "questions_zh": [
+            "按月计算 GMV 和最近 3 个月移动平均",
+            "按渠道计算 GMV 环比增长率",
+            "按客群对比新客和老客 GMV 与毛利率",
+            "找出每个地区毛利最高的产品排名",
+            "关联销售和投放计算各渠道广告 ROI",
+            "按品类计算累计 GMV 贡献趋势",
         ],
         "setup": """
 CREATE TABLE IF NOT EXISTS orders (order_id INTEGER PRIMARY KEY, order_date TEXT, product TEXT, category TEXT, region TEXT, channel TEXT, units INTEGER, unit_price REAL, revenue REAL, cost REAL, gross_profit REAL);
@@ -111,25 +125,56 @@ INSERT OR IGNORE INTO orders VALUES
 (17,'2024-01-29','Widget A','Electronics','West','Retail',130,99.99,12999,7800,5199),
 (18,'2024-01-29','Widget B','Electronics','East','Online',70,149.99,10499,7350,3149),
 (19,'2024-01-29','Gadget X','Accessories','South','Online',260,24.99,6497,3248,3249),
-(20,'2024-01-29','Gadget Y','Accessories','North','Retail',200,34.99,6998,4000,2998);
+(20,'2024-01-29','Gadget Y','Accessories','North','Retail',200,34.99,6998,4000,2998),
+(21,'2024-02-05','Widget A','Electronics','North','Online',180,99.99,17998,10800,7198),
+(22,'2024-02-05','Widget B','Electronics','South','Retail',95,149.99,14249,9975,4274),
+(23,'2024-02-05','Gadget X','Accessories','East','Online',280,24.99,6997,3500,3497),
+(24,'2024-02-05','Gadget Y','Accessories','West','Retail',210,34.99,7348,4200,3148),
+(25,'2024-03-04','Widget A','Electronics','East','Online',210,99.99,20998,12600,8398),
+(26,'2024-03-04','Widget B','Electronics','North','Online',120,149.99,17999,12600,5399),
+(27,'2024-03-04','Gadget X','Accessories','South','Retail',300,24.99,7497,3750,3747),
+(28,'2024-03-04','Gadget Y','Accessories','West','Online',240,34.99,8398,4800,3598),
+(29,'2024-04-01','Widget A','Electronics','South','Retail',190,99.99,18998,11400,7598),
+(30,'2024-04-01','Widget B','Electronics','East','Online',145,149.99,21749,15225,6524),
+(31,'2024-04-01','Gadget X','Accessories','North','Online',340,24.99,8497,4250,4247),
+(32,'2024-04-01','Gadget Y','Accessories','West','Retail',260,34.99,9097,5200,3897),
+(33,'2024-05-06','Widget A','Electronics','West','Online',230,99.99,22998,13800,9198),
+(34,'2024-05-06','Widget B','Electronics','North','Retail',150,149.99,22499,15750,6749),
+(35,'2024-05-06','Gadget X','Accessories','East','Online',380,24.99,9496,4750,4746),
+(36,'2024-05-06','Gadget Y','Accessories','South','Online',290,34.99,10147,5800,4347),
+(37,'2024-06-03','Widget A','Electronics','North','Online',260,99.99,25997,15600,10397),
+(38,'2024-06-03','Widget B','Electronics','East','Retail',170,149.99,25498,17850,7648),
+(39,'2024-06-03','Gadget X','Accessories','West','Online',410,24.99,10246,5125,5121),
+(40,'2024-06-03','Gadget Y','Accessories','South','Retail',320,34.99,11197,6400,4797);
 INSERT OR IGNORE INTO customers VALUES
-(1,1,'Acme Corp','Enterprise','US',0),(2,2,'Beta LLC','SMB','US',1),(3,3,'Gamma Inc','Consumer','CA',1),(4,4,'Delta Co','SMB','CA',0),(5,5,'Acme Corp','Enterprise','US',0),(6,6,'Epsilon Ltd','Enterprise','UK',1),(7,7,'Zeta GmbH','SMB','DE',1),(8,8,'Eta SA','Consumer','FR',0),(9,9,'Theta Inc','SMB','US',1),(10,10,'Iota Corp','Enterprise','US',0),(11,11,'Kappa LLC','Consumer','CA',1),(12,12,'Lambda Co','SMB','UK',0),(13,13,'Mu Ltd','Consumer','US',1),(14,14,'Nu Corp','Enterprise','DE',0),(15,15,'Xi Inc','SMB','US',1),(16,16,'Omicron LLC','Consumer','CA',0),(17,17,'Pi Corp','Enterprise','US',1),(18,18,'Rho Ltd','SMB','UK',0),(19,19,'Sigma Inc','Consumer','FR',1),(20,20,'Tau Co','Enterprise','US',0);
+(1,1,'Acme Corp','Enterprise','US',0),(2,2,'Beta LLC','SMB','US',1),(3,3,'Gamma Inc','Consumer','CA',1),(4,4,'Delta Co','SMB','CA',0),(5,5,'Acme Corp','Enterprise','US',0),(6,6,'Epsilon Ltd','Enterprise','UK',1),(7,7,'Zeta GmbH','SMB','DE',1),(8,8,'Eta SA','Consumer','FR',0),(9,9,'Theta Inc','SMB','US',1),(10,10,'Iota Corp','Enterprise','US',0),(11,11,'Kappa LLC','Consumer','CA',1),(12,12,'Lambda Co','SMB','UK',0),(13,13,'Mu Ltd','Consumer','US',1),(14,14,'Nu Corp','Enterprise','DE',0),(15,15,'Xi Inc','SMB','US',1),(16,16,'Omicron LLC','Consumer','CA',0),(17,17,'Pi Corp','Enterprise','US',1),(18,18,'Rho Ltd','SMB','UK',0),(19,19,'Sigma Inc','Consumer','FR',1),(20,20,'Tau Co','Enterprise','US',0),
+(21,21,'Acme Corp','Enterprise','US',0),(22,22,'Beta LLC','SMB','US',0),(23,23,'Upsilon Inc','Consumer','CA',1),(24,24,'Delta Co','SMB','CA',0),(25,25,'Phi GmbH','Enterprise','DE',1),(26,26,'Iota Corp','Enterprise','US',0),(27,27,'Chi SA','Consumer','FR',1),(28,28,'Eta SA','Consumer','FR',0),(29,29,'Theta Inc','SMB','US',0),(30,30,'Psi Ltd','Enterprise','UK',1),(31,31,'Xi Inc','SMB','US',0),(32,32,'Omega LLC','Consumer','CA',1),(33,33,'Pi Corp','Enterprise','US',0),(34,34,'Nu Corp','Enterprise','DE',0),(35,35,'Zeta GmbH','SMB','DE',0),(36,36,'Sigma Inc','Consumer','FR',0),(37,37,'Acme Corp','Enterprise','US',0),(38,38,'Rho Ltd','SMB','UK',0),(39,39,'Lambda Co','SMB','UK',0),(40,40,'Omicron LLC','Consumer','CA',0);
 INSERT OR IGNORE INTO marketing VALUES
-('2024-01-01','Online',3200,120000,4800,384),('2024-01-01','Retail',1800,0,0,220),('2024-01-08','Online',3500,135000,5400,432),('2024-01-08','Retail',1900,0,0,195),('2024-01-15','Online',3800,150000,6000,510),('2024-01-15','Retail',2000,0,0,240),('2024-01-22','Online',3600,142000,5680,454),('2024-01-22','Retail',1950,0,0,228),('2024-01-29','Online',4000,160000,6400,544),('2024-01-29','Retail',2100,0,0,260);
+('2024-01-01','Online',3200,120000,4800,384),('2024-01-01','Retail',1800,0,0,220),('2024-01-08','Online',3500,135000,5400,432),('2024-01-08','Retail',1900,0,0,195),('2024-01-15','Online',3800,150000,6000,510),('2024-01-15','Retail',2000,0,0,240),('2024-01-22','Online',3600,142000,5680,454),('2024-01-22','Retail',1950,0,0,228),('2024-01-29','Online',4000,160000,6400,544),('2024-01-29','Retail',2100,0,0,260),
+('2024-02-05','Online',4500,180000,7200,640),('2024-02-05','Retail',2300,0,0,310),('2024-03-04','Online',5200,210000,8400,780),('2024-03-04','Retail',2600,0,0,345),('2024-04-01','Online',5600,230000,9200,830),('2024-04-01','Retail',2800,0,0,370),('2024-05-06','Online',6200,250000,10000,940),('2024-05-06','Retail',3100,0,0,410),('2024-06-03','Online',7000,285000,11400,1080),('2024-06-03','Retail',3500,0,0,460);
 """,
     },
     "👥 HR Analytics": {
         "description": "Employee headcount, salaries, tenure, and performance ratings by department",
+        "description_zh": "按部门拆分的员工人数、薪资、司龄、绩效与流失数据",
         "schema": """Tables:
 1. employees (emp_id, name, department, role, hire_date, salary, tenure_years, performance_score, is_active)
    — performance_score: 1–5, is_active: 1=current, 0=churned""",
         "questions": [
-            "Average salary by department?",
-            "Which department has the highest attrition?",
-            "Top 5 highest paid employees?",
-            "Average performance score by role?",
-            "How many employees joined each year?",
-            "Which department has the longest average tenure?",
+            "Attrition rate by department and salary quartile",
+            "Rank roles by pay vs performance efficiency",
+            "Active headcount joined each year by department",
+            "Departments with high pay but below-average retention",
+            "Average tenure gap between active and churned employees",
+            "Top performers whose salary is below role average",
+        ],
+        "questions_zh": [
+            "按部门和薪资四分位计算流失率",
+            "按薪资与绩效效率对岗位排名",
+            "按部门统计每年入职的在职人数",
+            "找出高薪但留存低于平均的部门",
+            "对比在职与流失员工的平均司龄差",
+            "找出薪资低于岗位平均的高绩效员工",
         ],
         "setup": """
 CREATE TABLE IF NOT EXISTS employees (emp_id INTEGER PRIMARY KEY, name TEXT, department TEXT, role TEXT, hire_date TEXT, salary REAL, tenure_years REAL, performance_score REAL, is_active INTEGER);
@@ -158,17 +203,26 @@ INSERT OR IGNORE INTO employees VALUES
     },
     "💰 SaaS Metrics": {
         "description": "Monthly recurring revenue, churn, CAC, and LTV across customer plans",
+        "description_zh": "按订阅方案拆分的 MRR、流失、CAC、客服工单与增长数据",
         "schema": """Tables:
 1. subscriptions (sub_id, customer, plan, mrr, start_date, end_date, churned, cac, country)
    — mrr in USD, churned: 1=churned, 0=active
 2. monthly_metrics (month, plan, new_customers, churned_customers, mrr, support_tickets)""",
         "questions": [
-            "Total MRR by plan?",
-            "Churn rate by plan?",
-            "Which country has the highest average MRR?",
-            "Average CAC by plan?",
-            "MRR trend over time?",
-            "Which month had the highest net new customers?",
+            "Monthly MRR with trailing 3-month moving average",
+            "Net new customers and churn rate by plan over time",
+            "Plan-level CAC payback using active MRR",
+            "Support tickets per $1k MRR by plan",
+            "Countries with high MRR but high churn risk",
+            "Rank plans by expansion quality and churn pressure",
+        ],
+        "questions_zh": [
+            "按月计算 MRR 和最近 3 个月移动平均",
+            "按方案计算净新增客户和流失率趋势",
+            "用在订 MRR 计算各方案 CAC 回收期",
+            "按方案计算每千美元 MRR 的工单数",
+            "找出高 MRR 但高流失风险的国家",
+            "按增长质量和流失压力给方案排名",
         ],
         "setup": """
 CREATE TABLE IF NOT EXISTS subscriptions (sub_id INTEGER PRIMARY KEY, customer TEXT, plan TEXT, mrr REAL, start_date TEXT, end_date TEXT, churned INTEGER, cac REAL, country TEXT);
@@ -207,7 +261,7 @@ INSERT OR IGNORE INTO monthly_metrics VALUES
 
 # ── Story opener ──────────────────────────────────────────────────────────────
 
-def generate_story_opener(db_key: str, conn) -> dict:
+def generate_story_opener(db_key: str, conn, lang: str) -> dict:
     try:
         if "E-commerce" in db_key:
             rev = pd.read_sql_query(
@@ -223,16 +277,30 @@ def generate_story_opener(db_key: str, conn) -> dict:
             ch_ratio = ch.set_index("channel")["rev"]
             online_rev = ch_ratio.get("Online", 0)
             retail_rev = ch_ratio.get("Retail", 0)
+            if lang == "中文":
+                return {
+                    "headline": (
+                        f"<b>{top_rev['product']}</b> GMV 最高，达到 "
+                        f"${top_rev['rev']:,.0f}；但 <b>{top_margin['product']}</b> 的毛利率为 "
+                        f"{top_margin['margin']:.0%}，高出 "
+                        f"{(top_margin['margin'] - top_rev['margin']):.0%}。"
+                    ),
+                    "insight": (
+                        f"Online 渠道贡献了总 GMV 的 {online_rev/(online_rev+retail_rev):.0%}。"
+                        f"可以继续追问投放 ROI 是否匹配 GMV 贡献。"
+                    ),
+                    "action": "建议按下方“发现 → 诊断 → 决策”的顺序演示复杂查询。",
+                }
             return {
                 "headline": (
-                    f"<b>{top_rev['product']}</b> leads revenue at "
+                    f"<b>{top_rev['product']}</b> leads GMV at "
                     f"${top_rev['rev']:,.0f} — but <b>{top_margin['product']}</b> runs a "
                     f"{top_margin['margin']:.0%} gross margin, "
                     f"{(top_margin['margin'] - top_rev['margin']):.0%} higher."
                 ),
                 "insight": (
                     f"Online channel drives {online_rev/(online_rev+retail_rev):.0%} of total "
-                    f"revenue vs Retail. Are you allocating ad spend to match?"
+                    f"GMV vs Retail. Are you allocating ad spend to match?"
                 ),
                 "action": "Try the discovery flow below — each question builds on the last.",
             }
@@ -249,6 +317,16 @@ def generate_story_opener(db_key: str, conn) -> dict:
                 "GROUP BY department ORDER BY avg_sal DESC",
                 conn,
             ).iloc[0]
+            if lang == "中文":
+                return {
+                    "headline": (
+                        f"<b>{worst['department']}</b> 流失率最高，为 "
+                        f"{worst['rate']:.0%}；<b>{avg_sal['department']}</b> 的在职员工平均薪资最高，"
+                        f"为 ${avg_sal['avg_sal']:,.0f}/年。"
+                    ),
+                    "insight": "高流失和高薪资如果分布在不同部门，说明薪酬投入和留存效果可能不匹配。",
+                    "action": "建议先看部门流失率，再交叉分析薪资、绩效和司龄。",
+                }
             return {
                 "headline": (
                     f"<b>{worst['department']}</b> has the highest attrition at "
@@ -270,6 +348,15 @@ def generate_story_opener(db_key: str, conn) -> dict:
                 "GROUP BY plan ORDER BY total_mrr DESC",
                 conn,
             ).iloc[0]
+            if lang == "中文":
+                return {
+                    "headline": (
+                        f"<b>{worst['plan']}</b> 方案流失率最高，为 {worst['rate']:.0%}；"
+                        f"<b>{best_mrr['plan']}</b> 方案贡献了 ${best_mrr['total_mrr']:,.0f}/月的在订 MRR。"
+                    ),
+                    "insight": "入门方案的高流失会削弱后续升级漏斗，需要判断新增和扩张 MRR 是否覆盖流失。",
+                    "action": "建议先比较各方案流失率，再追踪 MRR 的 rolling average 趋势。",
+                }
             return {
                 "headline": (
                     f"<b>{worst['plan']}</b> plan churn rate is {worst['rate']:.0%} — "
@@ -304,29 +391,41 @@ def generate_sql(client, question: str, schema: str, table_names: list) -> str:
         f"Schema:\n{schema}\n\n"
         f"Available tables: {tables_hint}\n\n"
         "Rules: return ONLY the SQL, no markdown fences, no explanation. "
+        "Use CTEs, joins, CASE expressions, date functions, and window functions when the question needs "
+        "rolling averages, cumulative totals, rankings, month-over-month changes, or contribution analysis. "
         "Use proper aggregations and ORDER BY. Limit to 20 rows unless asked for all. "
         "Match column names exactly as in the schema."
     )
     resp = client.chat.completions.create(
         model="deepseek-chat",
         messages=[{"role": "system", "content": system}, {"role": "user", "content": question}],
-        temperature=0, max_tokens=400,
+        temperature=0, max_tokens=800,
     )
     sql = resp.choices[0].message.content.strip()
     sql = re.sub(r"^```(?:sql)?\s*", "", sql, flags=re.IGNORECASE)
     sql = re.sub(r"\s*```$", "", sql)
     return sql.strip()
 
-def explain_result(client, question: str, sql: str, df: pd.DataFrame) -> str:
+def explain_result(client, question: str, sql: str, df: pd.DataFrame, lang: str) -> str:
     preview = df.head(10).to_string(index=False)
-    system = (
-        "You are a senior business analyst presenting to a CMO. Given the question, SQL, and query results, "
-        "write a crisp 3-sentence business interpretation. "
-        "Sentence 1: Lead with the single most important number or finding — be specific. "
-        "Sentence 2: Explain what it means for the business (cause, comparison, or context). "
-        "Sentence 3: Give one concrete action the team should take next week based on this data. "
-        "No hedging. No markdown. Write in plain business English."
-    )
+    if lang == "中文":
+        system = (
+            "你是一位面向业务负责人的资深数据分析师。根据问题、SQL 和查询结果，"
+            "用中文写一段简洁的 3 句话业务解读。"
+            "第 1 句直接给出最重要的数字或发现，必须具体。"
+            "第 2 句解释它对业务意味着什么，可以包含原因、对比或上下文。"
+            "第 3 句给出下周可以执行的一条具体行动建议。"
+            "不要使用 markdown，不要含糊。"
+        )
+    else:
+        system = (
+            "You are a senior business analyst presenting to a CMO. Given the question, SQL, and query results, "
+            "write a crisp 3-sentence business interpretation. "
+            "Sentence 1: Lead with the single most important number or finding — be specific. "
+            "Sentence 2: Explain what it means for the business (cause, comparison, or context). "
+            "Sentence 3: Give one concrete action the team should take next week based on this data. "
+            "No hedging. No markdown. Write in plain business English."
+        )
     resp = client.chat.completions.create(
         model="deepseek-chat",
         messages=[{"role": "system", "content": system},
@@ -411,7 +510,7 @@ st.markdown(f"""
 <h1 style='background:linear-gradient(90deg,#6366f1,#06b6d4);
 -webkit-background-clip:text;-webkit-text-fill-color:transparent;
 font-size:2.2rem;font-weight:700;margin-bottom:0.2rem'>💬 ChatBI</h1>
-<p style='color:#94a3b8;font-size:1rem;margin-bottom:1.5rem'>
+<p style='color:var(--text-color);opacity:0.72;font-size:1rem;margin-bottom:1.5rem'>
 {t('Ask any business question → AI writes SQL → live results + interpretation',
    '用自然语言提问 → AI 生成 SQL → 实时结果 + 解读')}</p>
 """, unsafe_allow_html=True)
@@ -440,12 +539,13 @@ No SQL knowledge needed. Switch to Upload mode to run it on your own CSV.<br><br
 # ── Step 1: Choose data source ─────────────────────────────────────────────────
 st.markdown(f'<span class="section-tag">{t("Step 1 — Choose your data","第 1 步 — 选择数据")}</span>', unsafe_allow_html=True)
 
-mode_opts = [t("Use a sample database","使用示例数据库"), t("Upload my own CSV","上传自有 CSV")]
 mode = st.radio(
     "Data source",
-    mode_opts,
+    ["sample", "upload"],
+    format_func=lambda value: t("Use a sample database", "使用示例数据库") if value == "sample" else t("Upload my own CSV", "上传自有 CSV"),
     horizontal=True,
     label_visibility="collapsed",
+    key="data_source_mode",
 )
 
 conn = None
@@ -453,21 +553,21 @@ schema_str = ""
 table_names = []
 sample_questions = []
 
-if mode == mode_opts[0]:
+if mode == "sample":
     db_choice = st.selectbox(
         t("Select a sample database","选择示例数据库"),
         list(SAMPLE_DBS.keys()),
         label_visibility="collapsed",
     )
     db = SAMPLE_DBS[db_choice]
-    st.markdown(f"<span style='color:#94a3b8;font-size:0.85rem'>📊 {db['description']}</span>",
+    st.markdown(f"<span class='muted-text'>📊 {db.get('description_zh') if lang == '中文' else db['description']}</span>",
                 unsafe_allow_html=True)
 
     with st.expander(f"📋 {t('View schema','查看 Schema')}"):
         st.code(db["schema"], language="text")
 
     # Build DB
-    cache_key = f"db_{db_choice}"
+    cache_key = f"db_v2_{db_choice}"
     if cache_key not in st.session_state:
         c = sqlite3.connect(":memory:", check_same_thread=False)
         c.executescript(db["setup"])
@@ -475,13 +575,13 @@ if mode == mode_opts[0]:
         st.session_state[cache_key] = c
     conn = st.session_state[cache_key]
     schema_str = db["schema"]
-    sample_questions = db["questions"]
+    sample_questions = db.get("questions_zh", db["questions"]) if lang == "中文" else db["questions"]
     # Extract table names from schema
     table_names = re.findall(r"^\d+\.\s+(\w+)", db["schema"], re.MULTILINE)
     # Compute and cache story opener
-    story_key = f"{cache_key}_story"
+    story_key = f"{cache_key}_story_{lang}"
     if story_key not in st.session_state:
-        st.session_state[story_key] = generate_story_opener(db_choice, conn)
+        st.session_state[story_key] = generate_story_opener(db_choice, conn, lang)
     st.session_state["_current_story"] = st.session_state[story_key]
 
 else:
@@ -503,7 +603,7 @@ else:
     # Upload guidelines
     if lang == "中文":
         st.markdown("""
-    <div class="guide-box" style='color:#e2e8f0'>
+    <div class="guide-box">
     <b>📎 上传须知</b><br>
     • <b>格式：</b>仅支持 CSV（UTF-8 或常见编码）<br>
     • <b>大小：</b>~50 MB / ~50 万行以内效果良好<br>
@@ -513,7 +613,7 @@ else:
     </div>""", unsafe_allow_html=True)
     else:
         st.markdown("""
-    <div class="guide-box" style='color:#e2e8f0'>
+    <div class="guide-box">
     <b>📎 Upload guidelines</b><br>
     • <b>Format:</b> CSV files only (UTF-8 or common encodings)<br>
     • <b>Size:</b> Up to ~50 MB / ~500k rows work well<br>
@@ -541,17 +641,20 @@ else:
                 try:
                     df_up = pd.read_csv(f)
                 except Exception as e:
-                    st.error(f"Failed to parse `{f.name}`. Please confirm CSV encoding and delimiter. Detail: {e}")
+                    st.error(f"{t('Failed to parse','解析失败')} `{f.name}`. {t('Please confirm CSV encoding and delimiter. Detail:','请确认 CSV 编码和分隔符。详情：')} {e}")
                     continue
                 if df_up.empty:
-                    st.warning(f"`{f.name}` is empty. Skipped.")
+                    st.warning(t(f"`{f.name}` is empty. Skipped.", f"`{f.name}` 是空文件，已跳过。"))
                     continue
                 # Sanitize column names
                 df_up.columns = [re.sub(r"[^\w]", "_", col).lower() for col in df_up.columns]
                 df_up.to_sql(tname, c, if_exists="replace", index=False)
                 tables.append(tname)
                 schemas.append(build_schema_from_df(df_up, tname))
-                st.success(f"✅ Loaded `{tname}` — {len(df_up):,} rows × {len(df_up.columns)} columns")
+                st.success(t(
+                    f"Loaded `{tname}` — {len(df_up):,} rows × {len(df_up.columns)} columns",
+                    f"已加载 `{tname}` — {len(df_up):,} 行 × {len(df_up.columns)} 列"
+                ))
             c.commit()
             if tables:
                 st.session_state[upload_key] = c
@@ -574,7 +677,7 @@ else:
             table_names = []
 
         # Auto-generate column-aware suggestions once per upload
-        sugg_key = f"{upload_key}_suggestions"
+        sugg_key = f"{upload_key}_suggestions_{lang}"
         if conn is not None and sugg_key not in st.session_state:
             try:
                 client = get_client()
@@ -582,9 +685,12 @@ else:
                     model="deepseek-chat",
                     messages=[
                         {"role": "system", "content":
-                            "You are a data analyst. Given a database schema, suggest exactly 6 short, "
-                            "specific business questions a user might ask. Return a JSON array of 6 strings only. "
-                            "Each question should be under 10 words. No numbering."},
+                            (
+                                "You are a data analyst. Given a database schema, suggest exactly 6 short, "
+                                "specific business questions a user might ask. Return a JSON array of 6 strings only. "
+                                "Each question should be under 12 words. No numbering. "
+                                f"Write every question in {'Chinese' if lang == '中文' else 'English'}."
+                            )},
                         {"role": "user", "content": f"Schema:\n{schema_str}"}
                     ],
                     temperature=0.3, max_tokens=300,
@@ -595,14 +701,25 @@ else:
                 suggestions = json.loads(raw)
                 st.session_state[sugg_key] = suggestions[:6]
             except Exception:
-                st.session_state[sugg_key] = [
-                    "What are the top 5 rows by value?",
-                    "Show totals grouped by category",
-                    "Which row has the highest amount?",
-                    "Show count by each unique group",
-                    "What is the average value per group?",
-                    "Show the trend over time",
-                ]
+                st.session_state[sugg_key] = (
+                    [
+                        "按月计算核心指标移动平均",
+                        "按分组计算环比增长率",
+                        "找出累计贡献最高的类别",
+                        "按维度排名并计算占比",
+                        "对比高价值和低价值分组",
+                        "找出异常波动最大的时间段",
+                    ]
+                    if lang == "中文"
+                    else [
+                        "Monthly metrics with moving average",
+                        "Month-over-month growth by group",
+                        "Categories with highest cumulative contribution",
+                        "Rank dimensions and calculate share",
+                        "Compare high-value and low-value groups",
+                        "Find periods with largest anomalies",
+                    ]
+                )
         sample_questions = st.session_state[sugg_key] if sugg_key in st.session_state else []
     else:
         st.info(t("⬆ Upload one or more CSV files to get started.","⬆ 上传一个或多个 CSV 文件开始分析。"))
@@ -686,7 +803,7 @@ if conn is not None:
 
         with st.spinner(t("Interpreting…","正在解读结果…")):
             try:
-                explanation = explain_result(client, question, sql, df_result)
+                explanation = explain_result(client, question, sql, df_result, lang)
                 st.session_state["last_explanation"] = explanation
             except Exception:
                 st.session_state["last_explanation"] = ""
@@ -707,7 +824,7 @@ if conn is not None:
                      "只读分析意图。如 SQL 执行失败，请用明确的指标 + 维度重新描述问题。"))
 
         st.markdown(f'<span class="section-tag">{t("Step 4 — Results","第 4 步 — 查询结果")}</span>', unsafe_allow_html=True)
-        st.markdown(f"<span style='color:#94a3b8;font-size:0.85rem'>{len(df):,} {t('rows returned','行结果')}</span>",
+        st.markdown(f"<span class='muted-text'>{len(df):,} {t('rows returned','行结果')}</span>",
                     unsafe_allow_html=True)
         st.dataframe(df, use_container_width=True, height=min(300, 55 + len(df) * 35))
         auto_chart(df)
@@ -715,8 +832,7 @@ if conn is not None:
         if explanation:
             st.markdown(f'<span class="section-tag">{t("Step 5 — Interpretation","第 5 步 — 解读")}</span>', unsafe_allow_html=True)
             st.markdown(
-                f"<div style='background:#1e293b;border-left:3px solid #6366f1;border-radius:0 8px 8px 0;"
-                f"padding:1rem 1.2rem;color:#e2e8f0;line-height:1.8'>{explanation}</div>",
+                f"<div class='insight-box'>{explanation}</div>",
                 unsafe_allow_html=True,
             )
             key_metric = ""
