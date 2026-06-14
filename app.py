@@ -31,8 +31,28 @@ st.markdown("""
     color:var(--text-color) !important;border-radius:8px;
     min-height:42px;font-weight:600;
   }
+  .stButton>button * { color:inherit !important; }
   .stButton>button:hover { border-color:var(--primary-color); }
-  .stButton>button[kind="primary"] { background:var(--primary-color) !important;border-color:var(--primary-color) !important; color:white !important; }
+  .stButton>button[kind="primary"] {
+    background:#2563eb !important;border-color:#1d4ed8 !important;color:#ffffff !important;
+    box-shadow:0 1px 2px rgba(37,99,235,0.25);
+  }
+  .stButton>button:disabled {
+    background:rgba(120,130,150,0.16) !important;border-color:rgba(120,130,150,0.35) !important;
+    color:rgba(120,130,150,0.95) !important;opacity:1 !important;
+  }
+  [data-testid="stTextInput"] input {
+    background:var(--secondary-background-color) !important;
+    color:var(--text-color) !important;
+    border:1px solid rgba(120,130,150,0.55) !important;
+    border-radius:8px !important;
+    caret-color:var(--primary-color) !important;
+  }
+  [data-testid="stTextInput"] input::placeholder { color:var(--text-color) !important; opacity:0.62 !important; }
+  [data-testid="stTextInput"] input:focus {
+    border-color:#2563eb !important;
+    box-shadow:0 0 0 1px #2563eb !important;
+  }
   [data-testid="stDataFrame"] { border:1px solid rgba(120,130,150,0.45);border-radius:8px; }
   code { background:var(--secondary-background-color) !important; color:var(--text-color) !important; }
   [data-testid="stFileUploader"] {
@@ -79,32 +99,44 @@ CHART_THEME = dict(template="streamlit",
 
 SAMPLE_DBS = {
     "🛒 E-commerce": {
-        "description": "Weekly sales across products, regions, channels + marketing spend",
-        "description_zh": "按产品、地区、渠道拆分的周度销售、客户与投放数据",
+        "description": "Weekly sales, customers, marketing, inventory, product margin, and returns",
+        "description_zh": "销售、客户、投放、库存、商品毛利和退款退货数据",
+        "scenario": "GMV is growing, but leadership needs to know whether profit is leaking through discounts, refunds, ad spend, or stockouts.",
+        "scenario_zh": "GMV 在增长，但管理层想知道利润是否被折扣、退款、投放和缺货吃掉。",
         "schema": """Tables:
 1. orders (order_id, order_date, product, category, region, channel, units, unit_price, revenue, cost, gross_profit)
 2. customers (customer_id, order_id, customer_name, segment, country, is_new)  — is_new: 1=new, 0=returning
-3. marketing (week, channel, ad_spend, impressions, clicks, conversions)""",
+3. marketing (week, channel, ad_spend, impressions, clicks, conversions)
+4. products (product, category, supplier, launch_date, list_price, target_margin)
+5. inventory (month, product, beginning_stock, ending_stock, stockouts)
+6. returns (return_id, order_id, return_date, reason, refund_amount)
+7. promotions (campaign_id, campaign_name, product, channel, start_date, end_date, discount_pct, promo_spend)
+8. monthly_targets (month, category, target_gmv, target_gross_profit)""",
         "questions": [
             "Monthly GMV with trailing 3-month moving average",
             "Month-over-month GMV growth by channel",
             "New vs returning customer GMV and margin by segment",
-            "Rank each region's top product by gross profit",
-            "Ad spend ROI by channel with revenue joined",
-            "Cumulative GMV contribution by category over time",
+            "Promotion lift after discounts and refunds",
+            "GMV target attainment after stockouts",
+            "Net profit by category after refunds, promo spend, and ad spend",
         ],
         "questions_zh": [
             "按月计算 GMV 和最近 3 个月移动平均",
             "按渠道计算 GMV 环比增长率",
             "按客群对比新客和老客 GMV 与毛利率",
-            "找出每个地区毛利最高的产品排名",
-            "关联销售和投放计算各渠道广告 ROI",
-            "按品类计算累计 GMV 贡献趋势",
+            "扣除折扣和退款后分析促销提升",
+            "分析缺货后的 GMV 目标达成率",
+            "按品类计算扣除退款、促销和投放后的净利润",
         ],
         "setup": """
 CREATE TABLE IF NOT EXISTS orders (order_id INTEGER PRIMARY KEY, order_date TEXT, product TEXT, category TEXT, region TEXT, channel TEXT, units INTEGER, unit_price REAL, revenue REAL, cost REAL, gross_profit REAL);
 CREATE TABLE IF NOT EXISTS customers (customer_id INTEGER PRIMARY KEY, order_id INTEGER, customer_name TEXT, segment TEXT, country TEXT, is_new INTEGER);
 CREATE TABLE IF NOT EXISTS marketing (week TEXT, channel TEXT, ad_spend REAL, impressions INTEGER, clicks INTEGER, conversions INTEGER);
+CREATE TABLE IF NOT EXISTS products (product TEXT PRIMARY KEY, category TEXT, supplier TEXT, launch_date TEXT, list_price REAL, target_margin REAL);
+CREATE TABLE IF NOT EXISTS inventory (month TEXT, product TEXT, beginning_stock INTEGER, ending_stock INTEGER, stockouts INTEGER);
+CREATE TABLE IF NOT EXISTS returns (return_id INTEGER PRIMARY KEY, order_id INTEGER, return_date TEXT, reason TEXT, refund_amount REAL);
+CREATE TABLE IF NOT EXISTS promotions (campaign_id INTEGER PRIMARY KEY, campaign_name TEXT, product TEXT, channel TEXT, start_date TEXT, end_date TEXT, discount_pct REAL, promo_spend REAL);
+CREATE TABLE IF NOT EXISTS monthly_targets (month TEXT, category TEXT, target_gmv REAL, target_gross_profit REAL);
 INSERT OR IGNORE INTO orders VALUES
 (1,'2024-01-01','Widget A','Electronics','North','Online',120,99.99,11999,7200,4799),
 (2,'2024-01-01','Widget B','Electronics','South','Online',80,149.99,11999,8400,3599),
@@ -152,32 +184,75 @@ INSERT OR IGNORE INTO customers VALUES
 INSERT OR IGNORE INTO marketing VALUES
 ('2024-01-01','Online',3200,120000,4800,384),('2024-01-01','Retail',1800,0,0,220),('2024-01-08','Online',3500,135000,5400,432),('2024-01-08','Retail',1900,0,0,195),('2024-01-15','Online',3800,150000,6000,510),('2024-01-15','Retail',2000,0,0,240),('2024-01-22','Online',3600,142000,5680,454),('2024-01-22','Retail',1950,0,0,228),('2024-01-29','Online',4000,160000,6400,544),('2024-01-29','Retail',2100,0,0,260),
 ('2024-02-05','Online',4500,180000,7200,640),('2024-02-05','Retail',2300,0,0,310),('2024-03-04','Online',5200,210000,8400,780),('2024-03-04','Retail',2600,0,0,345),('2024-04-01','Online',5600,230000,9200,830),('2024-04-01','Retail',2800,0,0,370),('2024-05-06','Online',6200,250000,10000,940),('2024-05-06','Retail',3100,0,0,410),('2024-06-03','Online',7000,285000,11400,1080),('2024-06-03','Retail',3500,0,0,460);
+INSERT OR IGNORE INTO products VALUES
+('Widget A','Electronics','Northstar Supply','2023-08-01',99.99,0.42),
+('Widget B','Electronics','Apex Components','2023-10-15',149.99,0.36),
+('Gadget X','Accessories','BrightWorks','2023-06-01',24.99,0.48),
+('Gadget Y','Accessories','BrightWorks','2023-09-20',34.99,0.44);
+INSERT OR IGNORE INTO inventory VALUES
+('2024-01','Widget A',920,690,0),('2024-01','Widget B',620,430,1),('2024-01','Gadget X',1500,390,0),('2024-01','Gadget Y',1180,340,0),
+('2024-02','Widget A',690,510,0),('2024-02','Widget B',430,335,2),('2024-02','Gadget X',390,110,3),('2024-02','Gadget Y',340,130,1),
+('2024-03','Widget A',720,510,0),('2024-03','Widget B',520,400,0),('2024-03','Gadget X',900,600,0),('2024-03','Gadget Y',620,380,0),
+('2024-04','Widget A',510,320,1),('2024-04','Widget B',400,255,0),('2024-04','Gadget X',600,260,0),('2024-04','Gadget Y',380,120,2),
+('2024-05','Widget A',650,420,0),('2024-05','Widget B',500,350,1),('2024-05','Gadget X',800,420,0),('2024-05','Gadget Y',720,430,0),
+('2024-06','Widget A',420,160,2),('2024-06','Widget B',350,180,1),('2024-06','Gadget X',420,10,4),('2024-06','Gadget Y',430,110,2);
+INSERT OR IGNORE INTO returns VALUES
+(1,2,'2024-01-05','Defective',149.99),(2,7,'2024-01-12','Late delivery',49.98),(3,14,'2024-01-28','Wrong item',149.99),
+(4,22,'2024-02-12','Defective',299.98),(5,25,'2024-03-10','Buyer remorse',99.99),(6,28,'2024-03-16','Damaged package',69.98),
+(7,30,'2024-04-08','Defective',299.98),(8,32,'2024-04-12','Late delivery',104.97),(9,35,'2024-05-12','Wrong item',74.97),
+(10,37,'2024-06-08','Defective',199.98),(11,39,'2024-06-10','Damaged package',124.95),(12,40,'2024-06-16','Buyer remorse',69.98);
+INSERT OR IGNORE INTO promotions VALUES
+(1,'New Year Electronics Push','Widget A','Online','2024-01-01','2024-01-31',0.08,2400),
+(2,'Retail Bundle Week','Gadget Y','Retail','2024-02-01','2024-02-29',0.12,1300),
+(3,'Spring Accessory Boost','Gadget X','Online','2024-03-01','2024-03-31',0.10,1800),
+(4,'April Electronics Promo','Widget B','Online','2024-04-01','2024-04-30',0.15,2600),
+(5,'May Loyalty Offer','Widget A','Online','2024-05-01','2024-05-31',0.06,2100),
+(6,'June Clearance','Gadget X','Online','2024-06-01','2024-06-30',0.18,3000);
+INSERT OR IGNORE INTO monthly_targets VALUES
+('2024-01','Electronics',112000,42000),('2024-01','Accessories',52000,23000),
+('2024-02','Electronics',36000,12500),('2024-02','Accessories',17000,7000),
+('2024-03','Electronics',39000,14500),('2024-03','Accessories',16500,7300),
+('2024-04','Electronics',42000,15500),('2024-04','Accessories',19000,8200),
+('2024-05','Electronics',46000,17000),('2024-05','Accessories',21000,9000),
+('2024-06','Electronics',52000,19000),('2024-06','Accessories',24000,10200);
 """,
     },
     "👥 HR Analytics": {
-        "description": "Employee headcount, salaries, tenure, and performance ratings by department",
-        "description_zh": "按部门拆分的员工人数、薪资、司龄、绩效与流失数据",
+        "description": "Employee, department budget, performance review, engagement, and retention data",
+        "description_zh": "员工、部门预算、绩效复评、敬业度和留存风险数据",
+        "scenario": "The company is growing headcount, but wants to identify regrettable attrition and decide who needs a retention offer first.",
+        "scenario_zh": "公司在扩张团队，但需要识别可惜流失，并决定哪些高价值员工要优先留才。",
         "schema": """Tables:
 1. employees (emp_id, name, department, role, hire_date, salary, tenure_years, performance_score, is_active)
-   — performance_score: 1–5, is_active: 1=current, 0=churned""",
+   — performance_score: 1–5, is_active: 1=current, 0=churned
+2. departments (department, business_unit, annual_budget, headcount_target)
+3. performance_reviews (review_id, emp_id, review_date, manager_rating, promotion_ready, flight_risk)
+4. engagement_surveys (survey_id, emp_id, survey_date, engagement_score, workload_score)
+5. terminations (emp_id, termination_date, exit_reason, regrettable)
+6. compensation_benchmarks (role, market_midpoint, market_p75)""",
         "questions": [
             "Attrition rate by department and salary quartile",
-            "Rank roles by pay vs performance efficiency",
-            "Active headcount joined each year by department",
-            "Departments with high pay but below-average retention",
-            "Average tenure gap between active and churned employees",
-            "Top performers whose salary is below role average",
+            "Departments over budget with below-average engagement",
+            "Regrettable attrition by department and exit reason",
+            "High performers below market pay with high flight risk",
+            "Workload and engagement drivers of regrettable attrition",
+            "Retention save list ranked by performance, pay gap, and flight risk",
         ],
         "questions_zh": [
             "按部门和薪资四分位计算流失率",
-            "按薪资与绩效效率对岗位排名",
-            "按部门统计每年入职的在职人数",
-            "找出高薪但留存低于平均的部门",
-            "对比在职与流失员工的平均司龄差",
-            "找出薪资低于岗位平均的高绩效员工",
+            "找出超预算且敬业度低于平均的部门",
+            "按部门和离职原因分析可惜流失",
+            "找出低于市场薪资且高流失风险的高绩效员工",
+            "分析工作量和敬业度对可惜流失的影响",
+            "按绩效、薪资差距和流失风险生成留才名单",
         ],
         "setup": """
 CREATE TABLE IF NOT EXISTS employees (emp_id INTEGER PRIMARY KEY, name TEXT, department TEXT, role TEXT, hire_date TEXT, salary REAL, tenure_years REAL, performance_score REAL, is_active INTEGER);
+CREATE TABLE IF NOT EXISTS departments (department TEXT PRIMARY KEY, business_unit TEXT, annual_budget REAL, headcount_target INTEGER);
+CREATE TABLE IF NOT EXISTS performance_reviews (review_id INTEGER PRIMARY KEY, emp_id INTEGER, review_date TEXT, manager_rating REAL, promotion_ready INTEGER, flight_risk TEXT);
+CREATE TABLE IF NOT EXISTS engagement_surveys (survey_id INTEGER PRIMARY KEY, emp_id INTEGER, survey_date TEXT, engagement_score REAL, workload_score REAL);
+CREATE TABLE IF NOT EXISTS terminations (emp_id INTEGER PRIMARY KEY, termination_date TEXT, exit_reason TEXT, regrettable INTEGER);
+CREATE TABLE IF NOT EXISTS compensation_benchmarks (role TEXT PRIMARY KEY, market_midpoint REAL, market_p75 REAL);
 INSERT OR IGNORE INTO employees VALUES
 (1,'Alice Chen','Engineering','Senior Engineer','2019-03-01',145000,5.2,4.5,1),
 (2,'Bob Zhang','Engineering','Engineer','2021-06-15',105000,2.8,3.8,1),
@@ -199,34 +274,69 @@ INSERT OR IGNORE INTO employees VALUES
 (18,'Ryan Ong','Engineering','Senior Engineer','2018-12-01',142000,5.6,4.4,1),
 (19,'Sara Lau','Sales','Sales Rep','2021-11-01',76000,2.6,3.1,0),
 (20,'Tom Phua','Product','Senior PM','2017-05-01',160000,7.1,4.9,1);
+INSERT OR IGNORE INTO departments VALUES
+('Engineering','Product & Tech',1250000,7),('Product','Product & Tech',650000,4),('Marketing','Growth',360000,3),('Sales','Revenue',460000,5),('HR','Operations',220000,2);
+INSERT OR IGNORE INTO performance_reviews VALUES
+(1,1,'2024-01-15',4.6,1,'Medium'),(2,2,'2024-01-15',3.7,0,'Low'),(3,3,'2024-01-15',4.9,1,'Low'),(4,4,'2024-01-15',4.2,1,'Medium'),
+(5,5,'2024-01-15',4.7,1,'Low'),(6,6,'2024-01-15',3.8,0,'Medium'),(7,7,'2024-01-15',3.4,0,'High'),(8,8,'2024-01-15',3.0,0,'High'),
+(9,9,'2024-01-15',4.0,0,'Medium'),(10,10,'2024-01-15',4.8,1,'Low'),(11,11,'2024-01-15',4.2,0,'Low'),(12,12,'2024-01-15',3.5,0,'Medium'),
+(13,13,'2024-01-15',4.1,0,'Low'),(14,14,'2024-01-15',3.3,0,'Medium'),(15,15,'2024-01-15',4.0,0,'Medium'),(16,16,'2024-01-15',2.8,0,'High'),
+(17,17,'2024-01-15',4.3,1,'Medium'),(18,18,'2024-01-15',4.5,1,'High'),(19,19,'2024-01-15',3.0,0,'High'),(20,20,'2024-01-15',4.9,1,'Low');
+INSERT OR IGNORE INTO engagement_surveys VALUES
+(1,1,'2024-02-01',4.2,3.8),(2,2,'2024-02-01',3.6,4.1),(3,3,'2024-02-01',4.6,4.0),(4,4,'2024-02-01',4.0,3.7),
+(5,5,'2024-02-01',4.5,3.6),(6,6,'2024-02-01',3.4,4.4),(7,7,'2024-02-01',2.9,4.7),(8,8,'2024-02-01',2.8,4.5),
+(9,9,'2024-02-01',3.5,4.2),(10,10,'2024-02-01',4.4,3.5),(11,11,'2024-02-01',4.1,3.2),(12,12,'2024-02-01',3.7,3.9),
+(13,13,'2024-02-01',3.9,4.0),(14,14,'2024-02-01',3.2,4.3),(15,15,'2024-02-01',3.8,3.8),(16,16,'2024-02-01',2.6,4.8),
+(17,17,'2024-02-01',4.0,4.1),(18,18,'2024-02-01',3.3,4.7),(19,19,'2024-02-01',2.7,4.6),(20,20,'2024-02-01',4.7,3.4);
+INSERT OR IGNORE INTO terminations VALUES
+(16,'2024-03-31','Compensation',1),
+(19,'2024-04-15','Manager fit',1);
+INSERT OR IGNORE INTO compensation_benchmarks VALUES
+('Senior Engineer',150000,168000),('Engineer',112000,126000),('Lead Engineer',172000,190000),
+('PM',132000,148000),('Senior PM',162000,180000),('Marketing Manager',116000,130000),
+('Analyst',86000,96000),('Senior Analyst',102000,115000),('Sales Rep',80000,91000),
+('Senior Sales',104000,118000),('Sales Manager',142000,158000),('HR Manager',110000,124000),
+('Recruiter',76000,86000),('Junior Engineer',90000,100000);
 """,
     },
     "💰 SaaS Metrics": {
-        "description": "Monthly recurring revenue, churn, CAC, and LTV across customer plans",
-        "description_zh": "按订阅方案拆分的 MRR、流失、CAC、客服工单与增长数据",
+        "description": "Subscriptions, accounts, product usage, invoices, churn, CAC, and support data",
+        "description_zh": "订阅、账户画像、产品使用、账单、流失、CAC 和客服数据",
+        "scenario": "MRR is expanding, but the team needs to find accounts where low usage, contraction, late payment, or poor health puts revenue at risk.",
+        "scenario_zh": "MRR 在增长，但团队需要找出低使用率、收缩、逾期付款或健康分低导致收入有风险的客户。",
         "schema": """Tables:
 1. subscriptions (sub_id, customer, plan, mrr, start_date, end_date, churned, cac, country)
    — mrr in USD, churned: 1=churned, 0=active
-2. monthly_metrics (month, plan, new_customers, churned_customers, mrr, support_tickets)""",
+2. monthly_metrics (month, plan, new_customers, churned_customers, mrr, support_tickets)
+3. accounts (customer, segment, industry, seats, account_owner)
+4. product_usage (month, customer, active_users, seats_used, ai_queries, dashboards_created)
+5. invoices (invoice_id, customer, invoice_month, amount, paid_on_time)
+6. mrr_movements (month, customer, starting_mrr, expansion_mrr, contraction_mrr, churn_mrr)
+7. health_scores (month, customer, health_score, risk_reason)""",
         "questions": [
             "Monthly MRR with trailing 3-month moving average",
             "Net new customers and churn rate by plan over time",
-            "Plan-level CAC payback using active MRR",
-            "Support tickets per $1k MRR by plan",
-            "Countries with high MRR but high churn risk",
-            "Rank plans by expansion quality and churn pressure",
+            "NRR by segment with expansion and contraction",
+            "Usage decline and health score churn risk",
+            "Late payment, low usage, and high support risk accounts",
+            "Customer save list ranked by MRR at risk",
         ],
         "questions_zh": [
             "按月计算 MRR 和最近 3 个月移动平均",
             "按方案计算净新增客户和流失率趋势",
-            "用在订 MRR 计算各方案 CAC 回收期",
-            "按方案计算每千美元 MRR 的工单数",
-            "找出高 MRR 但高流失风险的国家",
-            "按增长质量和流失压力给方案排名",
+            "按客群计算包含扩张和收缩的 NRR",
+            "分析使用率下降和健康分带来的流失风险",
+            "找出逾期、低使用、高工单风险账户",
+            "按风险 MRR 生成客户挽留名单",
         ],
         "setup": """
 CREATE TABLE IF NOT EXISTS subscriptions (sub_id INTEGER PRIMARY KEY, customer TEXT, plan TEXT, mrr REAL, start_date TEXT, end_date TEXT, churned INTEGER, cac REAL, country TEXT);
 CREATE TABLE IF NOT EXISTS monthly_metrics (month TEXT, plan TEXT, new_customers INTEGER, churned_customers INTEGER, mrr REAL, support_tickets INTEGER);
+CREATE TABLE IF NOT EXISTS accounts (customer TEXT PRIMARY KEY, segment TEXT, industry TEXT, seats INTEGER, account_owner TEXT);
+CREATE TABLE IF NOT EXISTS product_usage (month TEXT, customer TEXT, active_users INTEGER, seats_used INTEGER, ai_queries INTEGER, dashboards_created INTEGER);
+CREATE TABLE IF NOT EXISTS invoices (invoice_id INTEGER PRIMARY KEY, customer TEXT, invoice_month TEXT, amount REAL, paid_on_time INTEGER);
+CREATE TABLE IF NOT EXISTS mrr_movements (month TEXT, customer TEXT, starting_mrr REAL, expansion_mrr REAL, contraction_mrr REAL, churn_mrr REAL);
+CREATE TABLE IF NOT EXISTS health_scores (month TEXT, customer TEXT, health_score INTEGER, risk_reason TEXT);
 INSERT OR IGNORE INTO subscriptions VALUES
 (1,'Acme Inc','Enterprise',2500,'2023-01-01',NULL,0,1200,'US'),
 (2,'Beta LLC','Pro',299,'2023-02-01',NULL,0,320,'US'),
@@ -255,6 +365,44 @@ INSERT OR IGNORE INTO monthly_metrics VALUES
 ('2023-04','Starter',11,3,539,10),('2023-04','Pro',7,2,2093,11),('2023-04','Enterprise',2,0,16000,4),
 ('2023-05','Starter',15,1,686,12),('2023-05','Pro',10,1,2990,14),('2023-05','Enterprise',3,0,18500,6),
 ('2023-06','Starter',13,2,637,9),('2023-06','Pro',8,0,3289,12),('2023-06','Enterprise',2,1,21000,5);
+INSERT OR IGNORE INTO accounts VALUES
+('Acme Inc','Strategic','FinTech',120,'Nina'),('Beta LLC','SMB','E-commerce',12,'Owen'),('Gamma Co','SMB','Education',5,'Owen'),('Delta Ltd','Mid-Market','Healthcare',28,'Priya'),
+('Echo Corp','Strategic','Manufacturing',140,'Nina'),('Foxtrot GmbH','Mid-Market','SaaS',24,'Priya'),('Golf SA','SMB','Retail',6,'Owen'),('Hotel Inc','Strategic','FinTech',180,'Nina'),
+('India LLC','SMB','Marketing',14,'Owen'),('Juliet Co','SMB','Education',4,'Owen'),('Kilo Ltd','Mid-Market','Healthcare',36,'Priya'),('Lima Corp','Strategic','Logistics',95,'Nina'),
+('Mike Inc','SMB','Retail',5,'Owen'),('Nov LLC','SMB','Marketing',11,'Owen'),('Oscar Co','Strategic','Manufacturing',160,'Nina'),('Papa Ltd','SMB','E-commerce',7,'Owen'),
+('Quebec Corp','Mid-Market','SaaS',42,'Priya'),('Romeo Inc','SMB','Education',5,'Owen'),('Sierra LLC','Strategic','FinTech',110,'Nina'),('Tango Co','Mid-Market','Logistics',30,'Priya');
+INSERT OR IGNORE INTO product_usage VALUES
+('2023-04','Acme Inc',101,96,9100,48),('2023-05','Acme Inc',98,92,8700,45),('2023-06','Acme Inc',92,88,8200,42),
+('2023-04','Beta LLC',9,8,780,7),('2023-05','Beta LLC',8,7,700,6),('2023-06','Beta LLC',7,6,640,5),
+('2023-04','Gamma Co',3,3,220,2),('2023-05','Gamma Co',2,1,120,1),('2023-06','Gamma Co',1,1,55,1),
+('2023-04','Delta Ltd',18,16,1800,12),('2023-05','Delta Ltd',19,17,1950,13),('2023-06','Delta Ltd',20,18,2100,14),
+('2023-04','Echo Corp',102,94,8600,46),('2023-05','Echo Corp',106,98,9100,49),('2023-06','Echo Corp',110,102,9600,51),
+('2023-04','Foxtrot GmbH',12,10,820,8),('2023-05','Foxtrot GmbH',8,6,460,4),('2023-06','Foxtrot GmbH',5,4,210,2),
+('2023-04','Golf SA',4,3,240,2),('2023-05','Golf SA',4,3,250,2),('2023-06','Golf SA',4,3,260,2),
+('2023-04','Hotel Inc',138,132,12400,60),('2023-05','Hotel Inc',145,139,13200,64),('2023-06','Hotel Inc',152,146,14000,68),
+('2023-04','India LLC',8,7,760,5),('2023-05','India LLC',9,8,840,6),('2023-06','India LLC',10,9,950,7),
+('2023-04','Juliet Co',3,2,160,1),('2023-05','Juliet Co',2,1,90,1),('2023-06','Juliet Co',1,1,45,0),
+('2023-06','Kilo Ltd',31,28,3300,18),('2023-06','Lima Corp',72,66,6900,36),('2023-06','Mike Inc',3,2,180,1),('2023-06','Nov LLC',2,2,95,1),
+('2023-06','Oscar Co',132,121,11800,58),('2023-06','Papa Ltd',5,4,310,3),('2023-06','Quebec Corp',35,33,4100,22),('2023-06','Romeo Inc',1,1,30,0),
+('2023-06','Sierra LLC',82,75,7400,39),('2023-06','Tango Co',22,19,2400,12);
+INSERT OR IGNORE INTO invoices VALUES
+(1,'Acme Inc','2023-06',2500,1),(2,'Beta LLC','2023-06',299,1),(3,'Gamma Co','2023-06',49,0),(4,'Delta Ltd','2023-06',299,1),
+(5,'Echo Corp','2023-06',2500,1),(6,'Foxtrot GmbH','2023-06',299,0),(7,'Golf SA','2023-06',49,1),(8,'Hotel Inc','2023-06',3500,1),
+(9,'India LLC','2023-06',299,1),(10,'Juliet Co','2023-06',49,0),(11,'Kilo Ltd','2023-06',499,1),(12,'Lima Corp','2023-06',2500,1),
+(13,'Mike Inc','2023-06',49,1),(14,'Nov LLC','2023-06',299,0),(15,'Oscar Co','2023-06',3500,1),(16,'Papa Ltd','2023-06',49,1),
+(17,'Quebec Corp','2023-06',499,1),(18,'Romeo Inc','2023-06',49,0),(19,'Sierra LLC','2023-06',2500,1),(20,'Tango Co','2023-06',299,1);
+INSERT OR IGNORE INTO mrr_movements VALUES
+('2023-06','Acme Inc',2500,300,0,0),('2023-06','Beta LLC',299,0,50,0),('2023-06','Gamma Co',49,0,0,49),('2023-06','Delta Ltd',299,60,0,0),
+('2023-06','Echo Corp',2500,500,0,0),('2023-06','Foxtrot GmbH',299,0,120,0),('2023-06','Golf SA',49,0,0,0),('2023-06','Hotel Inc',3500,700,0,0),
+('2023-06','India LLC',299,80,0,0),('2023-06','Juliet Co',49,0,0,49),('2023-06','Kilo Ltd',499,100,0,0),('2023-06','Lima Corp',2500,250,0,0),
+('2023-06','Mike Inc',49,0,0,0),('2023-06','Nov LLC',299,0,90,0),('2023-06','Oscar Co',3500,600,0,0),('2023-06','Papa Ltd',49,0,0,0),
+('2023-06','Quebec Corp',499,120,0,0),('2023-06','Romeo Inc',49,0,0,49),('2023-06','Sierra LLC',2500,300,0,0),('2023-06','Tango Co',299,0,40,0);
+INSERT OR IGNORE INTO health_scores VALUES
+('2023-06','Acme Inc',78,'Usage decline'),('2023-06','Beta LLC',62,'Seat underuse'),('2023-06','Gamma Co',31,'Low usage and late payment'),('2023-06','Delta Ltd',82,'Healthy'),
+('2023-06','Echo Corp',91,'Expansion ready'),('2023-06','Foxtrot GmbH',38,'Usage collapse'),('2023-06','Golf SA',70,'Stable'),('2023-06','Hotel Inc',94,'Expansion ready'),
+('2023-06','India LLC',83,'Healthy'),('2023-06','Juliet Co',28,'Low usage and late payment'),('2023-06','Kilo Ltd',86,'Healthy'),('2023-06','Lima Corp',88,'Healthy'),
+('2023-06','Mike Inc',66,'Low depth'),('2023-06','Nov LLC',35,'Late payment and low usage'),('2023-06','Oscar Co',92,'Expansion ready'),('2023-06','Papa Ltd',72,'Stable'),
+('2023-06','Quebec Corp',89,'Expansion ready'),('2023-06','Romeo Inc',24,'Churned'),('2023-06','Sierra LLC',81,'Healthy'),('2023-06','Tango Co',58,'Seat underuse');
 """,
     },
 }
@@ -384,12 +532,14 @@ def build_schema_from_df(df: pd.DataFrame, table_name: str = "data") -> str:
     sample = df.head(3).to_string(index=False)
     return f"Table: {table_name} ({col_info})\n\nSample rows:\n{sample}"
 
-def generate_sql(client, question: str, schema: str, table_names: list) -> str:
+def generate_sql(client, question: str, schema: str, table_names: list, business_context: str = "") -> str:
     tables_hint = ", ".join(table_names)
+    context_block = f"\nBusiness context and metric definitions:\n{business_context}\n" if business_context else ""
     system = (
         "You are an expert SQL analyst. Convert the business question to a valid SQLite query.\n\n"
         f"Schema:\n{schema}\n\n"
         f"Available tables: {tables_hint}\n\n"
+        f"{context_block}"
         "Rules: return ONLY the SQL, no markdown fences, no explanation. "
         "Use CTEs, joins, CASE expressions, date functions, and window functions when the question needs "
         "rolling averages, cumulative totals, rankings, month-over-month changes, or contribution analysis. "
@@ -406,8 +556,9 @@ def generate_sql(client, question: str, schema: str, table_names: list) -> str:
     sql = re.sub(r"\s*```$", "", sql)
     return sql.strip()
 
-def explain_result(client, question: str, sql: str, df: pd.DataFrame, lang: str) -> str:
+def explain_result(client, question: str, sql: str, df: pd.DataFrame, lang: str, business_context: str = "") -> str:
     preview = df.head(10).to_string(index=False)
+    context_block = f"\n\nBusiness context and metric definitions:\n{business_context}" if business_context else ""
     if lang == "中文":
         system = (
             "你是一位面向业务负责人的资深数据分析师。根据问题、SQL 和查询结果，"
@@ -429,7 +580,7 @@ def explain_result(client, question: str, sql: str, df: pd.DataFrame, lang: str)
     resp = client.chat.completions.create(
         model="deepseek-chat",
         messages=[{"role": "system", "content": system},
-                  {"role": "user", "content": f"Question: {question}\n\nSQL:\n{sql}\n\nResults:\n{preview}"}],
+                  {"role": "user", "content": f"Question: {question}\n\nSQL:\n{sql}\n\nResults:\n{preview}{context_block}"}],
         temperature=0.3, max_tokens=300,
     )
     return resp.choices[0].message.content.strip()
@@ -499,6 +650,9 @@ with st.sidebar:
             "last_df",
             "last_explanation",
             "last_question",
+            "business_context_notes",
+            "knowledge_docs",
+            "suggestion_refresh_id",
         ]:
             st.session_state.pop(key, None)
         st.rerun()
@@ -552,6 +706,7 @@ conn = None
 schema_str = ""
 table_names = []
 sample_questions = []
+business_context = ""
 
 if mode == "sample":
     db_choice = st.selectbox(
@@ -562,12 +717,17 @@ if mode == "sample":
     db = SAMPLE_DBS[db_choice]
     st.markdown(f"<span class='muted-text'>📊 {db.get('description_zh') if lang == '中文' else db['description']}</span>",
                 unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='guide-box'><b>{t('Demo scenario','演示场景')}</b><br>"
+        f"{db.get('scenario_zh') if lang == '中文' else db.get('scenario', '')}</div>",
+        unsafe_allow_html=True,
+    )
 
     with st.expander(f"📋 {t('View schema','查看 Schema')}"):
         st.code(db["schema"], language="text")
 
     # Build DB
-    cache_key = f"db_v2_{db_choice}"
+    cache_key = f"db_v4_{db_choice}"
     if cache_key not in st.session_state:
         c = sqlite3.connect(":memory:", check_same_thread=False)
         c.executescript(db["setup"])
@@ -575,6 +735,7 @@ if mode == "sample":
         st.session_state[cache_key] = c
     conn = st.session_state[cache_key]
     schema_str = db["schema"]
+    business_context = db.get("scenario_zh") if lang == "中文" else db.get("scenario", "")
     sample_questions = db.get("questions_zh", db["questions"]) if lang == "中文" else db["questions"]
     # Extract table names from schema
     table_names = re.findall(r"^\d+\.\s+(\w+)", db["schema"], re.MULTILINE)
@@ -605,22 +766,80 @@ else:
         st.markdown("""
     <div class="guide-box">
     <b>📎 上传须知</b><br>
-    • <b>格式：</b>仅支持 CSV（UTF-8 或常见编码）<br>
-    • <b>大小：</b>~50 MB / ~50 万行以内效果良好<br>
-    • <b>列名：</b>保持简单——不含空格或特殊字符（使用下划线）<br>
-    • <b>多文件：</b>上传多个 CSV 以支持跨表查询<br>
-    • <b>最适合：</b>交易数据、报表、Excel / Google Sheets / BI 工具导出
+    • <b>CSV 内容：</b>一行一条记录，第一行必须是列名；适合订单、客户、账单、工单、员工、产品使用等结构化表<br>
+    • <b>CSV 大小：</b>建议单个文件 ≤ 50 MB，行数 ≤ 50 万；列名尽量使用英文、数字、下划线<br>
+    • <b>多文件：</b>可以上传多个 CSV；如果需要跨表查询，请确保有可关联字段，例如 customer_id、order_id、month<br>
+    • <b>知识文档：</b>可上传 .txt / .md，建议单个 ≤ 2 MB，用来说明业务背景、指标口径、字段含义、表关联规则<br>
+    • <b>目的：</b>让 AI 不只看到 schema，还能理解 GMV、留存、流失风险、净收入等业务定义
     </div>""", unsafe_allow_html=True)
     else:
         st.markdown("""
     <div class="guide-box">
     <b>📎 Upload guidelines</b><br>
-    • <b>Format:</b> CSV files only (UTF-8 or common encodings)<br>
-    • <b>Size:</b> Up to ~50 MB / ~500k rows work well<br>
-    • <b>Column names:</b> Keep them simple — no spaces or special characters (use underscores)<br>
-    • <b>Multiple files:</b> Upload several CSVs to enable cross-table queries<br>
-    • <b>What works best:</b> Transactional data, reports, exports from Excel / Google Sheets / BI tools
+    • <b>CSV content:</b> One record per row, first row as headers; best for orders, customers, invoices, tickets, employees, or usage tables<br>
+    • <b>CSV size:</b> Recommended ≤ 50 MB and ≤ 500k rows per file; keep column names simple with letters, numbers, and underscores<br>
+    • <b>Multiple files:</b> Upload several CSVs for joins; include join keys such as customer_id, order_id, or month<br>
+    • <b>Knowledge docs:</b> Optional .txt / .md files, recommended ≤ 2 MB each, for business context, metric definitions, field meanings, and join rules<br>
+    • <b>Purpose:</b> Help AI understand business definitions like GMV, retention, churn risk, and net revenue beyond the schema
     </div>""", unsafe_allow_html=True)
+
+    st.markdown(f"**{t('Business context / knowledge base','业务上下文 / 知识库')}**")
+    with st.expander(t("What should I write here?","这里应该填什么？"), expanded=False):
+        if lang == "中文":
+            st.markdown(
+                "- **业务目标：** 例如提升净收入、降低流失、找出库存缺口\n"
+                "- **指标口径：** 例如 GMV = revenue - refund_amount，NRR = (starting_mrr + expansion - contraction - churn) / starting_mrr\n"
+                "- **字段含义：** 例如 paid_on_time = 1 表示按时付款，health_score < 50 表示高风险\n"
+                "- **关联规则：** 例如 orders.order_id = customers.order_id，usage.customer = subscriptions.customer"
+            )
+        else:
+            st.markdown(
+                "- **Business goal:** e.g. improve net revenue, reduce churn, find inventory gaps\n"
+                "- **Metric definitions:** e.g. GMV = revenue - refund_amount, NRR = (starting_mrr + expansion - contraction - churn) / starting_mrr\n"
+                "- **Field meanings:** e.g. paid_on_time = 1 means paid on time, health_score < 50 means high risk\n"
+                "- **Join rules:** e.g. orders.order_id = customers.order_id, usage.customer = subscriptions.customer"
+            )
+    business_notes = st.text_area(
+        t("Describe the business problem, KPI definitions, and join rules",
+          "填写业务问题、指标口径和表关联规则"),
+        placeholder=t(
+            "Example: GMV = revenue - refund_amount. Active customer = is_active = 1. Join orders to customers by order_id.",
+            "例：GMV = revenue - refund_amount；活跃客户 = is_active = 1；orders 和 customers 通过 order_id 关联。"
+        ),
+        height=130,
+        key="business_context_notes",
+        label_visibility="collapsed",
+    )
+    knowledge_files = st.file_uploader(
+        t("Optional: upload business docs (.txt / .md, max 2 MB each)",
+          "可选：上传业务说明文档（.txt / .md，单个最大 2 MB）"),
+        type=["txt", "md"],
+        accept_multiple_files=True,
+        key="knowledge_docs",
+    )
+    doc_parts = []
+    for doc in knowledge_files:
+        if getattr(doc, "size", 0) > 2 * 1024 * 1024:
+            st.warning(t(f"`{doc.name}` is larger than 2 MB and was skipped.",
+                         f"`{doc.name}` 超过 2 MB，已跳过。"))
+            continue
+        doc_text = doc.getvalue().decode("utf-8", errors="replace").strip()
+        if doc_text:
+            doc_parts.append(f"Document: {doc.name}\n{doc_text[:8000]}")
+    business_context = "\n\n".join(part for part in [business_notes.strip(), *doc_parts] if part)
+    if business_context:
+        st.caption(t(
+            f"Knowledge context ready: {len(business_context):,} characters from notes and docs.",
+            f"业务上下文已就绪：来自输入和文档的 {len(business_context):,} 个字符。"
+        ))
+    else:
+        st.info(t(
+            "Optional but recommended: add KPI definitions and join rules so generated SQL matches your business logic.",
+            "可选但建议填写：加入指标口径和表关联规则，生成的 SQL 会更符合真实业务逻辑。"
+        ))
+    if st.button(t("Refresh suggested questions from context","根据业务上下文刷新建议问题"), use_container_width=True):
+        st.session_state["suggestion_refresh_id"] = st.session_state.get("suggestion_refresh_id", 0) + 1
+        st.rerun()
 
     st.session_state["_current_story"] = {}
     uploaded = st.file_uploader(
@@ -636,7 +855,12 @@ else:
             c = sqlite3.connect(":memory:", check_same_thread=False)
             schemas = []
             tables = []
+            table_summaries = []
             for f in uploaded:
+                if getattr(f, "size", 0) > 50 * 1024 * 1024:
+                    st.warning(t(f"`{f.name}` is larger than 50 MB and was skipped.",
+                                 f"`{f.name}` 超过 50 MB，已跳过。"))
+                    continue
                 tname = re.sub(r"[^\w]", "_", f.name.rsplit(".", 1)[0]).lower()
                 try:
                     df_up = pd.read_csv(f)
@@ -650,6 +874,11 @@ else:
                 df_up.columns = [re.sub(r"[^\w]", "_", col).lower() for col in df_up.columns]
                 df_up.to_sql(tname, c, if_exists="replace", index=False)
                 tables.append(tname)
+                table_summaries.append({
+                    "table": tname,
+                    "rows": len(df_up),
+                    "columns": len(df_up.columns),
+                })
                 schemas.append(build_schema_from_df(df_up, tname))
                 st.success(t(
                     f"Loaded `{tname}` — {len(df_up):,} rows × {len(df_up.columns)} columns",
@@ -660,6 +889,7 @@ else:
                 st.session_state[upload_key] = c
                 st.session_state[f"{upload_key}_schema"] = "\n\n".join(schemas)
                 st.session_state[f"{upload_key}_tables"] = tables
+                st.session_state[f"{upload_key}_summary"] = table_summaries
             else:
                 st.error(t("No valid CSV table loaded. Please upload at least one non-empty CSV.","未加载到有效 CSV 表。请上传至少一个非空 CSV 文件。"))
                 conn = None
@@ -668,6 +898,16 @@ else:
             conn = st.session_state[upload_key]
             schema_str = st.session_state[f"{upload_key}_schema"]
             table_names = st.session_state[f"{upload_key}_tables"]
+            table_summaries = st.session_state.get(f"{upload_key}_summary", [])
+
+            if table_summaries:
+                st.markdown(f"**{t('Loaded tables','已加载表')}**")
+                summary_df = pd.DataFrame(table_summaries).rename(columns={
+                    "table": t("Table","表名"),
+                    "rows": t("Rows","行数"),
+                    "columns": t("Columns","列数"),
+                })
+                st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
             with st.expander(f"📋 {t('Detected schema','检测到的 Schema')}"):
                 st.code(schema_str, language="text")
@@ -677,7 +917,8 @@ else:
             table_names = []
 
         # Auto-generate column-aware suggestions once per upload
-        sugg_key = f"{upload_key}_suggestions_{lang}"
+        suggestion_refresh_id = st.session_state.get("suggestion_refresh_id", 0)
+        sugg_key = f"{upload_key}_suggestions_{lang}_{suggestion_refresh_id}"
         if conn is not None and sugg_key not in st.session_state:
             try:
                 client = get_client()
@@ -691,7 +932,7 @@ else:
                                 "Each question should be under 12 words. No numbering. "
                                 f"Write every question in {'Chinese' if lang == '中文' else 'English'}."
                             )},
-                        {"role": "user", "content": f"Schema:\n{schema_str}"}
+                        {"role": "user", "content": f"Schema:\n{schema_str}\n\nBusiness context:\n{business_context}"}
                     ],
                     temperature=0.3, max_tokens=300,
                 )
@@ -763,9 +1004,19 @@ if conn is not None:
     if "_q_inject" in st.session_state:
         st.session_state["question_input"] = st.session_state.pop("_q_inject")
 
+    question_placeholder = (
+        t("e.g. Calculate monthly net revenue by customer segment using our KPI definitions",
+          "例：按照我填写的指标口径，按客户分群计算月度净收入")
+        if mode == "upload"
+        else t("e.g. Which product has the highest gross profit margin?","例：哪个产品毛利率最高？")
+    )
+    st.caption(t(
+        "Use a suggested question, or ask your own business question in natural language.",
+        "可以点击推荐问题，也可以直接用自然语言提出自己的业务问题。"
+    ))
     question = st.text_input(
         t("Ask anything about your data","向数据提任何业务问题"),
-        placeholder=t("e.g. Which product has the highest gross profit margin?","例：哪个产品毛利率最高？"),
+        placeholder=question_placeholder,
         key="question_input",
         label_visibility="collapsed",
     )
@@ -785,7 +1036,7 @@ if conn is not None:
         client = get_client()
         with st.spinner(t("Writing SQL…","正在生成 SQL…")):
             try:
-                sql = generate_sql(client, question, schema_str, table_names)
+                sql = generate_sql(client, question, schema_str, table_names, business_context)
                 st.session_state["last_sql"] = sql
                 st.session_state["last_question"] = question
             except Exception as e:
@@ -803,7 +1054,7 @@ if conn is not None:
 
         with st.spinner(t("Interpreting…","正在解读结果…")):
             try:
-                explanation = explain_result(client, question, sql, df_result, lang)
+                explanation = explain_result(client, question, sql, df_result, lang, business_context)
                 st.session_state["last_explanation"] = explanation
             except Exception:
                 st.session_state["last_explanation"] = ""
