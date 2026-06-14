@@ -587,23 +587,24 @@ def explain_result(client, question: str, sql: str, df: pd.DataFrame, lang: str,
 
 def auto_chart(df: pd.DataFrame):
     if df.empty or len(df) < 2:
-        return
+        return None
     num_cols = df.select_dtypes("number").columns.tolist()
     cat_cols = [c for c in df.columns if c not in num_cols]
     if not num_cols:
-        return
+        return None
     y = num_cols[0]
     x = cat_cols[0] if cat_cols else (num_cols[1] if len(num_cols) > 1 else None)
     if not x:
-        return
+        return None
     try:
         kwargs = dict(color_discrete_sequence=CHART_THEME["color_sequence"], template=CHART_THEME["template"])
         fig = (px.bar(df, x=x, y=y, **kwargs) if df[x].nunique() <= 15
                else px.line(df, x=x, y=y, markers=True, **kwargs))
         fig.update_layout(margin=dict(t=30, b=20), height=320)
         st.plotly_chart(fig, use_container_width=True)
+        return fig
     except Exception:
-        pass
+        return None
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -1078,7 +1079,17 @@ if conn is not None:
         st.markdown(f"<span class='muted-text'>{len(df):,} {t('rows returned','行结果')}</span>",
                     unsafe_allow_html=True)
         st.dataframe(df, use_container_width=True, height=min(300, 55 + len(df) * 35))
-        auto_chart(df)
+        fig = auto_chart(df)
+
+        key_metric = ""
+        if not df.empty:
+            first_col = df.columns[0]
+            second_col = df.columns[1] if len(df.columns) > 1 else None
+            if second_col:
+                key_metric = t(
+                    f"Top signal right now: `{df.iloc[0][first_col]}` with `{df.iloc[0][second_col]}`.",
+                    f"当前最强信号：`{df.iloc[0][first_col]}` 对应 `{df.iloc[0][second_col]}`。"
+                )
 
         if explanation:
             st.markdown(f'<span class="section-tag">{t("Step 5 — Interpretation","第 5 步 — 解读")}</span>', unsafe_allow_html=True)
@@ -1086,15 +1097,6 @@ if conn is not None:
                 f"<div class='insight-box'>{explanation}</div>",
                 unsafe_allow_html=True,
             )
-            key_metric = ""
-            if not df.empty:
-                first_col = df.columns[0]
-                second_col = df.columns[1] if len(df.columns) > 1 else None
-                if second_col:
-                    key_metric = t(
-                        f"Top signal right now: `{df.iloc[0][first_col]}` with `{df.iloc[0][second_col]}`.",
-                        f"当前最强信号：`{df.iloc[0][first_col]}` 对应 `{df.iloc[0][second_col]}`。"
-                    )
             st.markdown(f'<span class="section-tag">{t("Step 6 — Decision action","第 6 步 — 决策行动")}</span>', unsafe_allow_html=True)
             st.markdown(
                 f"<div class='guide-box'><b>{t('Decision memo','决策备忘录')}</b><br>"
@@ -1106,4 +1108,48 @@ if conn is not None:
 
         st.divider()
         csv_bytes = df.to_csv(index=False).encode()
-        st.download_button(t("⬇ Download results as CSV","⬇ 下载结果为 CSV"), csv_bytes, "results.csv", "text/csv")
+        report_md = f"""# {t('ChatBI Analysis Report','ChatBI 分析报告')}
+
+## {t('Question','问题')}
+{st.session_state.get('last_question', 'N/A')}
+
+## {t('Business Interpretation','业务解读')}
+{explanation if explanation else t('No interpretation was generated.', '未生成业务解读。')}
+
+## {t('Key Signal','关键信号')}
+{key_metric if key_metric else t('Use the top row result as the primary evidence.', '以首行结果作为主要证据。')}
+
+## {t('Generated SQL','生成的 SQL')}
+```sql
+{sql}
+```
+
+## {t('Result Preview','结果预览')}
+```csv
+{df.head(20).to_csv(index=False)}
+```
+"""
+        st.markdown(f"**{t('Download package','下载结果包')}**")
+        download_cols = st.columns(3)
+        with download_cols[0]:
+            st.download_button(t("Download CSV data","下载 CSV 数据"), csv_bytes, "chatbi_results.csv", "text/csv", use_container_width=True)
+        with download_cols[1]:
+            st.download_button(
+                t("Download analysis report","下载分析总结"),
+                report_md.encode("utf-8"),
+                "chatbi_analysis_report.md",
+                "text/markdown",
+                use_container_width=True,
+            )
+        with download_cols[2]:
+            if fig is not None:
+                chart_html = fig.to_html(include_plotlyjs="cdn", full_html=True).encode("utf-8")
+                st.download_button(
+                    t("Download chart HTML","下载图表 HTML"),
+                    chart_html,
+                    "chatbi_chart.html",
+                    "text/html",
+                    use_container_width=True,
+                )
+            else:
+                st.button(t("No chart available","暂无图表可下载"), disabled=True, use_container_width=True)
