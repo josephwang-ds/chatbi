@@ -1,0 +1,9 @@
+customer_id,customer_name,segment,country,signup_date,is_active,health_score,account_owner
+C001,Acme Retail,Enterprise,US,2023-04-12,1,86,Nina
+C002,Beta Market,SMB,US,2023-08-20,1,71,Owen
+C003,Core Home,Consumer,CA,2023-11-03,1,44,Owen
+C004,Delta Trade,Enterprise,UK,2022-09-18,1,63,Priya
+C005,Echo Shop,SMB,DE,2024-01-07,1,58,Owen
+C006,Falcon Goods,Enterprise,US,2023-02-14,1,91,Nina
+C007,Green Supply,SMB,AU,2024-03-21,1,76,Priya
+C008,Horizon Direct,Consumer,SG,2024-04-09,1,39,Owen

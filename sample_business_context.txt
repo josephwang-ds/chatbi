@@ -1,0 +1,25 @@
+Business context:
+This dataset is for an e-commerce revenue quality analysis. The goal is to understand whether revenue growth is healthy after refunds and whether high-risk customer segments require follow-up.
+
+Tables:
+- sample1 contains order-level transactions.
+- sample2 contains customer profile and customer health data.
+
+Join rules:
+- sample1.customer_id = sample2.customer_id
+
+Metric definitions:
+- GMV = SUM(revenue)
+- Net revenue = SUM(revenue - refund_amount)
+- Gross profit = SUM(revenue - refund_amount - cost)
+- Gross margin = gross profit / net revenue
+- Refund rate = SUM(refund_amount) / SUM(revenue)
+- High-risk customer = health_score < 50
+- Active customer = is_active = 1
+
+Recommended business questions:
+- Calculate monthly GMV, net revenue, and gross margin.
+- Which customer segments have the highest refund rate?
+- Which channels drive the most net revenue after refunds?
+- Find high-risk customers with high net revenue.
+- Compare Enterprise, SMB, and Consumer gross margin.
