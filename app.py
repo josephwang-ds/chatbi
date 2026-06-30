@@ -4,11 +4,14 @@ Ask business questions in plain English → auto-generate SQL → run → explai
 Supports: built-in sample databases + upload your own CSV.
 """
 
-import os, re, sqlite3, json
+import os, re, sqlite3, json, time
+from datetime import datetime
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 from openai import OpenAI
+
+import ragbi  # retrieval (RAG) + SQL safety + result validation
 
 st.set_page_config(page_title="ChatBI — Natural Language Analytics", page_icon="💬", layout="wide")
 
@@ -532,14 +535,33 @@ def build_schema_from_df(df: pd.DataFrame, table_name: str = "data") -> str:
     sample = df.head(3).to_string(index=False)
     return f"Table: {table_name} ({col_info})\n\nSample rows:\n{sample}"
 
-def generate_sql(client, question: str, schema: str, table_names: list, business_context: str = "") -> str:
+def _log_query(question, sql, tables, rows, ms, status, parser):
+    """Append one entry to the in-session query log (the logging/feedback step)."""
+    log = st.session_state.setdefault("query_log", [])
+    log.insert(0, {
+        "time": datetime.now().strftime("%H:%M:%S"),
+        "question": question,
+        "tables": ", ".join(tables) if tables else "",
+        "rows": rows,
+        "ms": round(ms),
+        "status": status,
+        "parser": parser,
+        "sql": sql,
+    })
+    del log[50:]  # keep the log bounded
+
+
+def generate_sql(client, question: str, schema: str, table_names: list, business_context: str = "",
+                 fewshot_block: str = "") -> str:
     tables_hint = ", ".join(table_names)
     context_block = f"\nBusiness context and metric definitions:\n{business_context}\n" if business_context else ""
+    shots_block = f"\n{fewshot_block}\n" if fewshot_block else ""
     system = (
         "You are an expert SQL analyst. Convert the business question to a valid SQLite query.\n\n"
-        f"Schema:\n{schema}\n\n"
+        f"Schema (already narrowed to the relevant tables):\n{schema}\n\n"
         f"Available tables: {tables_hint}\n\n"
         f"{context_block}"
+        f"{shots_block}"
         "Rules: return ONLY the SQL, no markdown fences, no explanation. "
         "Use CTEs, joins, CASE expressions, date functions, and window functions when the question needs "
         "rolling averages, cumulative totals, rankings, month-over-month changes, or contribution analysis. "
@@ -1035,31 +1057,61 @@ if conn is not None:
     # ── Execute ────────────────────────────────────────────────────────────────
     if run and question:
         client = get_client()
+        t_start = time.perf_counter()
+
+        # ── Step 1 — Retrieval (RAG): schema linking + dynamic few-shot ──────
+        with st.spinner(t("Retrieving relevant schema…","正在检索相关 Schema…")):
+            ctx = ragbi.retrieve_context(question, schema_str, top_k=4, n_shots=2)
+            linked_schema = ctx["schema"]
+            linked_tables = ctx["selected"] or table_names
+            fewshot_block = ragbi.render_fewshot_block(ctx["fewshots"])
+            st.session_state["last_retrieval"] = ctx
+
         with st.spinner(t("Writing SQL…","正在生成 SQL…")):
             try:
-                sql = generate_sql(client, question, schema_str, table_names, business_context)
+                sql = generate_sql(client, question, linked_schema, linked_tables,
+                                   business_context, fewshot_block)
                 st.session_state["last_sql"] = sql
                 st.session_state["last_question"] = question
             except Exception as e:
                 st.error(f"{t('SQL generation failed:','SQL 生成失败：')} {e}")
                 st.stop()
 
+        # ── Step 2 — Safety gate: AST-based read-only validation ────────────
+        check = ragbi.validate_sql(sql, allowed_tables=table_names, max_rows=1000)
+        st.session_state["last_sqlcheck"] = check
+        if not check.ok:
+            reason = check.reason_zh if lang == "中文" else check.reason_en
+            st.error(f"🛡️ {t('Blocked by SQL safety gate:','被 SQL 安全校验拦截：')} {reason}")
+            st.code(sql, language="sql")
+            _log_query(question, sql, linked_tables, 0,
+                       (time.perf_counter() - t_start) * 1000, "blocked", check.parser)
+            st.stop()
+        safe_sql = check.safe_sql or sql
+
         with st.spinner(t("Running query…","正在执行查询…")):
             try:
-                df_result = pd.read_sql_query(sql, conn)
+                df_result = pd.read_sql_query(safe_sql, conn)
                 st.session_state["last_df"] = df_result
             except Exception as e:
                 st.error(f"{t('Query error:','查询错误：')} {e}")
-                st.code(sql, language="sql")
+                st.code(safe_sql, language="sql")
+                _log_query(question, safe_sql, linked_tables, 0,
+                           (time.perf_counter() - t_start) * 1000, "error", check.parser)
                 st.stop()
+
+        # ── Result validation: empty / truncated / all-null checks ──────────
+        st.session_state["last_warnings"] = ragbi.validate_result(df_result, max_rows=1000)
 
         with st.spinner(t("Interpreting…","正在解读结果…")):
             try:
-                explanation = explain_result(client, question, sql, df_result, lang, business_context)
+                explanation = explain_result(client, question, safe_sql, df_result, lang, business_context)
                 st.session_state["last_explanation"] = explanation
             except Exception:
                 st.session_state["last_explanation"] = ""
 
+        _log_query(question, safe_sql, linked_tables, len(df_result),
+                   (time.perf_counter() - t_start) * 1000, "ok", check.parser)
         st.session_state["_q_inject"] = ""
         st.rerun()
 
@@ -1070,10 +1122,50 @@ if conn is not None:
         explanation = st.session_state.get("last_explanation", "")
 
         st.divider()
+
+        # ── Retrieval (RAG) panel ───────────────────────────────────────────
+        ctx = st.session_state.get("last_retrieval")
+        if ctx:
+            st.markdown(f'<span class="section-tag">{t("Step 2 — Retrieval (RAG)","第 2 步 — 检索 (RAG)")}</span>', unsafe_allow_html=True)
+            link_note = (t("schema linking narrowed to","Schema Linking 已收敛到") + f" {len(ctx['selected'])} " +
+                         t("table(s)","张表")) if ctx.get("linked") else t("used the full schema (small DB)","使用了完整 Schema(库较小)")
+            st.markdown(f"<span class='muted-text'>🔎 {link_note}: "
+                        f"<code>{', '.join(ctx['selected'])}</code></span>", unsafe_allow_html=True)
+            with st.expander(t("View retrieval detail","查看检索细节")):
+                trace = ctx.get("trace", [])
+                if trace:
+                    st.caption(t("Table relevance scores (schema linking)","表相关性打分(Schema Linking)"))
+                    st.dataframe(pd.DataFrame(trace), use_container_width=True, hide_index=True,
+                                 height=min(220, 55 + len(trace) * 35))
+                shots = ctx.get("fewshots", [])
+                if shots:
+                    st.caption(t("Dynamic few-shot examples retrieved","动态召回的 Few-shot 示例"))
+                    for ex in shots:
+                        st.markdown(f"**Q:** {ex['question']}")
+                        st.code(ex["sql"], language="sql")
+                else:
+                    st.caption(t("No few-shot example matched this question.","本次问题未匹配到 Few-shot 示例。"))
+
         st.markdown(f'<span class="section-tag">{t("Step 3 — Generated SQL","第 3 步 — 生成的 SQL")}</span>', unsafe_allow_html=True)
         st.code(sql, language="sql")
+
+        # ── Safety badge ────────────────────────────────────────────────────
+        check = st.session_state.get("last_sqlcheck")
+        if check is not None:
+            parser_name = "AST (sqlglot)" if check.parser == "sqlglot" else "regex"
+            st.markdown(
+                f"<span class='muted-text'>🛡️ {t('Passed read-only safety gate','已通过只读安全校验')} · "
+                f"{t('parser','解析器')}: <code>{parser_name}</code> · "
+                f"{t('SELECT-only · table whitelist · 1000-row cap','仅 SELECT · 表白名单 · 1000 行上限')}</span>",
+                unsafe_allow_html=True,
+            )
         st.caption(t("Read-only analytics intent. If SQL fails, rephrase your question with explicit metric + dimension.",
                      "只读分析意图。如 SQL 执行失败，请用明确的指标 + 维度重新描述问题。"))
+
+        # ── Result-validation warnings ──────────────────────────────────────
+        for w in st.session_state.get("last_warnings", []):
+            msg = w["zh"] if lang == "中文" else w["en"]
+            (st.warning if w["level"] == "warn" else st.info)(msg)
 
         st.markdown(f'<span class="section-tag">{t("Step 4 — Results","第 4 步 — 查询结果")}</span>', unsafe_allow_html=True)
         st.markdown(f"<span class='muted-text'>{len(df):,} {t('rows returned','行结果')}</span>",
@@ -1153,3 +1245,17 @@ if conn is not None:
                 )
             else:
                 st.button(t("No chart available","暂无图表可下载"), disabled=True, use_container_width=True)
+
+        # ── Query log (logging / feedback step) ─────────────────────────────
+        log = st.session_state.get("query_log", [])
+        if log:
+            st.divider()
+            with st.expander(f"🗒️ {t('Query log','查询日志')} ({len(log)})"):
+                log_df = pd.DataFrame(log)[["time", "status", "rows", "ms", "parser", "tables", "question"]]
+                log_df.columns = (["时间", "状态", "行数", "毫秒", "解析器", "命中表", "问题"]
+                                  if lang == "中文" else
+                                  ["time", "status", "rows", "ms", "parser", "tables", "question"])
+                st.dataframe(log_df, use_container_width=True, hide_index=True,
+                             height=min(280, 55 + len(log) * 35))
+                st.caption(t("Every request logs retrieved tables, latency, validation status, and parser used.",
+                             "每次请求都会记录命中的表、延迟、校验状态和所用解析器。"))

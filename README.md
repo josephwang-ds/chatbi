@@ -1,29 +1,46 @@
 # ChatBI
 
-A Streamlit Text-to-SQL demo for business analytics. Ask a business question in natural language, get generated SQLite, live query results, charts, and a concise business interpretation.
+A Streamlit Text-to-SQL demo for business analytics. Ask a business question in natural language and get a retrieval-grounded SQL query, a read-only safety check, live results, charts, and a concise business interpretation.
 
 ## Overview
 
-ChatBI is built for demoing how business users can explore data without writing SQL. It supports two paths:
+ChatBI is built for demoing how business users can explore data without writing SQL. It is not a thin "LLM writes SQL" wrapper — it implements a small but real **RAG → generate → validate → execute → verify** pipeline. It supports two paths:
 
 - **Sample databases** for guided demos across E-commerce, HR Analytics, and SaaS Metrics.
-- **Upload mode** for user CSV files, with an optional lightweight knowledge base for business context and metric definitions.
+- **Upload mode** for user CSV files, with an optional knowledge base for business context and metric definitions.
 
-Example:
+## Pipeline
 
 ```text
-"Calculate monthly GMV and the trailing 3-month moving average"
-        ↓
-AI generates SQLite with CTEs, date grouping, and window functions
-        ↓
-Query runs against an in-memory SQLite database
-        ↓
-The app returns a table, chart, generated SQL, and a business interpretation
+User question
+      ↓
+1. Retrieval (RAG)      schema linking picks the relevant tables +
+                        dynamic few-shot pulls the most similar SQL examples
+      ↓
+2. SQL generation       DeepSeek writes SQLite from the *narrowed* schema + examples + metric dictionary
+      ↓
+3. Safety gate          AST parse (sqlglot): SELECT-only, table whitelist,
+                        no DDL/DML, single statement, 1000-row cap
+      ↓
+4. Execution            runs against an in-memory SQLite database (read-only intent)
+      ↓
+5. Result validation    empty / truncated / all-NULL sanity checks
+      ↓
+6. Interpretation       3-sentence business read-out + logged to the query log
 ```
+
+The retrieval, safety, and validation logic lives in `ragbi.py` (Streamlit-free, so it is unit-testable in isolation).
+
+## Why RAG here
+
+Dumping a full schema into the prompt does not scale past a handful of tables and dilutes the model's attention. ChatBI instead **retrieves** the relevant tables for each question (schema linking), expands business terms through a **metric/synonym dictionary** (e.g. "净收入" → `revenue`, `refund_amount`), and injects only the **few-shot examples most similar to the question**. At demo scale the sample DBs are small, but the retrieval step is real and visible in the UI — open *Step 2 — Retrieval (RAG)* to see the per-table relevance scores and the examples that were pulled.
 
 ## Features
 
-- **Text-to-SQL** — DeepSeek converts natural language into valid SQLite.
+- **Retrieval-grounded Text-to-SQL** — schema linking + dynamic few-shot + metric dictionary, then DeepSeek generates SQLite.
+- **AST-based SQL safety gate** — `sqlglot` parses the query (not string matching): only a single read-only `SELECT`/CTE over whitelisted tables is allowed; `INSERT`/`UPDATE`/`DELETE`/`DROP`/`ALTER`/`PRAGMA`/`ATTACH` and stacked statements are blocked; a row cap is enforced. Falls back to a regex gate if `sqlglot` is unavailable.
+- **Result validation** — flags empty results, truncated results, and all-NULL columns.
+- **Query log** — every request records the retrieved tables, latency, validation status, and parser used.
 - **Complex analytics** — supports joins, CTEs, CASE logic, rankings, cumulative totals, month-over-month changes, and rolling averages.
 - **Live execution** — queries run against an in-memory SQLite database.
 - **Bilingual UI** — English and Chinese labels, prompts, sample questions, and interpretations.
@@ -122,7 +139,7 @@ The app sanitizes uploaded table and column names for SQLite compatibility.
   - Join rules, such as `orders.order_id = customers.order_id`
   - Business goals, such as reducing churn, improving net revenue, or finding inventory gaps
 
-This is a lightweight knowledge-base flow, not a vector database RAG pipeline. The text is passed directly into SQL generation and result interpretation prompts.
+This knowledge text feeds the metric dictionary used during retrieval and is passed into the SQL-generation and interpretation prompts. The retrieval step here is lexical (token + synonym matching over schema and examples) rather than embedding-based — a deliberate, dependency-light choice for a demo. The same `retrieve_context()` seam in `ragbi.py` is where a vector store / embedding retriever would plug in for a production-scale schema.
 
 ## Are The Database Tables Created?
 
@@ -141,6 +158,7 @@ No physical database file is written. The data exists only in the current Stream
 | Frontend | Streamlit |
 | Database | SQLite in memory |
 | AI | DeepSeek `deepseek-chat` via OpenAI-compatible API |
+| Retrieval + safety | `ragbi.py` — schema linking, dynamic few-shot, `sqlglot` AST safety gate, result validation |
 | Charts | Plotly Express |
 
 ## Quickstart
